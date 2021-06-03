@@ -1,52 +1,9 @@
-import org.yaml.snakeyaml.Yaml;
+@Library('github.com/coreos/coreos-ci-lib@main') _
 
-def shwrap(cmds) {
-    sh """
-        set -xeuo pipefail
-        # https://pagure.io/centos-infra/issue/79
-        if [ `umask` = 0000 ]; then
-          umask 0022
-        fi
-        ${cmds}
-    """
-}
-
-// Useful when we don't want to show confidential information in logs
-def shwrap_quiet(cmds) {
-    sh """
-        set +x -euo pipefail
-        # https://pagure.io/centos-infra/issue/79
-        if [ `umask` = 0000 ]; then
-          umask 0022
-        fi
-        ${cmds}
-    """
-}
-
-def shwrap_capture(cmds) {
-    return sh(returnStdout: true, script: """
-        set -euo pipefail
-        # https://pagure.io/centos-infra/issue/79
-        if [ `umask` = 0000 ]; then
-          umask 0022
-        fi
-        ${cmds}
-    """).trim()
-}
-
-def shwrap_rc(cmds) {
-    return sh(returnStatus: true, script: """
-        set -euo pipefail
-        # https://pagure.io/centos-infra/issue/79
-        if [ `umask` = 0000 ]; then
-          umask 0022
-        fi
-        ${cmds}
-    """)
-}
+import org.yaml.snakeyaml.Yaml
 
 def get_annotation(bc, anno) {
-    def bcYaml = readYaml(text: shwrap_capture("oc get buildconfig ${bc} -n ${env.PROJECT_NAME} -o yaml"))
+    def bcYaml = readYaml(text: shwrapCapture("oc get buildconfig ${bc} -n ${env.PROJECT_NAME} -o yaml"))
     return bcYaml['metadata']['annotations']["coreos.com/${anno}"]
 }
 
@@ -61,7 +18,7 @@ def get_pipeline_annotation(anno) {
 
 // This is like fileExists, but actually works inside the Kubernetes container.
 def path_exists(path) {
-    return shwrap_rc("test -e ${path}") == 0
+    return shwrapRc("test -e ${path}") == 0
 }
 
 // Parse and handle the result of Kola

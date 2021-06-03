@@ -1,3 +1,5 @@
+@Library('github.com/coreos/coreos-ci-lib@main') _
+
 import org.yaml.snakeyaml.Yaml;
 
 def utils, streams, official, official_jenkins, developer_prefix, src_config_url, src_config_ref, s3_bucket
@@ -132,14 +134,14 @@ lock(resource: "build-${params.STREAM}") {
 
         // declare these early so we can use them in `finally` block
         def newBuildID
-        def basearch = utils.shwrap_capture("cosa basearch")
+        def basearch = shwrapCapture("cosa basearch")
 
         try { timeout(time: 240, unit: 'MINUTES') {
 
         // Clone the automation repo, which contains helper scripts. In the
         // future, we'll probably want this either part of the cosa image, or
         // in a derivative of cosa for pipeline needs.
-        utils.shwrap("""
+        shwrap("""
         git clone --depth=1 https://github.com/coreos/fedora-coreos-releng-automation /var/tmp/fcos-releng
         """)
 
@@ -178,7 +180,7 @@ lock(resource: "build-${params.STREAM}") {
                 cache_img = "/srv/devel/${developer_prefix}/cache.qcow2"
             }
 
-            utils.shwrap("""
+            shwrap("""
             cosa init --force --branch ${ref} ${src_config_url}
             mkdir -p \$(dirname ${cache_img})
             ln -s ${cache_img} cache/cache.qcow2
@@ -186,7 +188,7 @@ lock(resource: "build-${params.STREAM}") {
 
             // If the cache img is larger than 7G, then nuke it. Otherwise
             // it'll just keep growing and we'll hit ENOSPC. It'll get rebuilt.
-            utils.shwrap("""
+            shwrap("""
             if [ -f ${cache_img} ] && [ \$(du ${cache_img} | cut -f1) -gt \$((1024*1024*7)) ]; then
                 rm -vf ${cache_img}
             fi
@@ -208,31 +210,31 @@ lock(resource: "build-${params.STREAM}") {
                     }
                 }
 
-                utils.shwrap("""
+                shwrap("""
                 export AWS_CONFIG_FILE=\${AWS_FCOS_BUILDS_BOT_CONFIG}
                 cosa buildprep s3://${s3_stream_dir}/builds
                 """)
                 if (parent_version != "") {
                     // also fetch the parent version; this is used by cosa to do the diff
-                    utils.shwrap("""
+                    shwrap("""
                     export AWS_CONFIG_FILE=\${AWS_FCOS_BUILDS_BOT_CONFIG}
                     cosa buildprep s3://${s3_stream_dir}/builds --build ${parent_version}
                     """)
                 }
             } else if (!official && utils.path_exists(developer_builddir)) {
-                utils.shwrap("""
+                shwrap("""
                 cosa buildprep ${developer_builddir}
                 """)
             }
 
-            utils.shwrap("""
+            shwrap("""
             cosa fetch --strict
             """)
         }
 
         def prevBuildID = null
         if (utils.path_exists("builds/latest")) {
-            prevBuildID = utils.shwrap_capture("readlink builds/latest")
+            prevBuildID = shwrapCapture("readlink builds/latest")
         }
 
         stage('Build') {
@@ -246,16 +248,16 @@ lock(resource: "build-${params.STREAM}") {
             if (params.VERSION) {
                 version = "--version ${params.VERSION}"
             } else if (official) {
-                def new_version = utils.shwrap_capture("/var/tmp/fcos-releng/scripts/versionary.py")
+                def new_version = shwrapCapture("/var/tmp/fcos-releng/scripts/versionary.py")
                 version = "--version ${new_version}"
             }
-            utils.shwrap("""
+            shwrap("""
             cosa build ostree --strict --skip-prune ${force} ${version} ${parent_arg}
             """)
         }
 
         def meta_json
-        def buildID = utils.shwrap_capture("readlink builds/latest")
+        def buildID = shwrapCapture("readlink builds/latest")
         if (prevBuildID == buildID) {
             currentBuild.result = 'SUCCESS'
             currentBuild.description = "[${params.STREAM}] 💤 (no new build)"
@@ -275,7 +277,7 @@ lock(resource: "build-${params.STREAM}") {
             }
 
             if (official) {
-                utils.shwrap("""
+                shwrap("""
                 /var/tmp/fcos-releng/scripts/broadcast-fedmsg.py --fedmsg-conf=/etc/fedora-messaging-cfg/fedmsg.toml \
                     build.state.change --build ${newBuildID} --basearch ${basearch} --stream ${params.STREAM} \
                     --build-dir ${BUILDS_BASE_HTTP_URL}/${params.STREAM}/builds/${newBuildID}/${basearch} \
@@ -286,7 +288,7 @@ lock(resource: "build-${params.STREAM}") {
 
         if (official && s3_stream_dir && utils.path_exists("/etc/fedora-messaging-cfg/fedmsg.toml")) {
             stage('Sign OSTree') {
-                utils.shwrap("""
+                shwrap("""
                 export AWS_CONFIG_FILE=\${AWS_FCOS_BUILDS_BOT_CONFIG}
                 cosa sign robosignatory --s3 ${s3_stream_dir}/builds \
                     --extra-fedmsg-keys stream=${params.STREAM} \
@@ -297,13 +299,13 @@ lock(resource: "build-${params.STREAM}") {
         }
 
         stage('Build QEMU') {
-            utils.shwrap("""
+            shwrap("""
             cosa buildextend-qemu
             """)
         }
 
         stage('Kola:QEMU basic') {
-            utils.shwrap("""
+            shwrap("""
             cosa kola run --basic-qemu-scenarios --no-test-exit-error
             tar -cf - tmp/kola/ | xz -c9 > kola-run-basic.tar.xz
             """)
@@ -316,7 +318,7 @@ lock(resource: "build-${params.STREAM}") {
         stage('Kola:QEMU') {
             // leave 512M for overhead; VMs are 1G each
             def parallel = ((cosa_memory_request_mb - 512) / 1024) as Integer
-            utils.shwrap("""
+            shwrap("""
             cosa kola run --parallel ${parallel} --no-test-exit-error
             tar -cf - tmp/kola/ | xz -c9 > kola-run.tar.xz
             """)
@@ -327,7 +329,7 @@ lock(resource: "build-${params.STREAM}") {
         }
 
         stage('Kola:QEMU upgrade') {
-            utils.shwrap("""
+            shwrap("""
             cosa kola --upgrades --no-test-exit-error
             tar -cf - tmp/kola-upgrade | xz -c9 > kola-run-upgrade.tar.xz
             """)
@@ -341,18 +343,18 @@ lock(resource: "build-${params.STREAM}") {
 
             stage("Metal") {
                 parallel metal: {
-                    utils.shwrap("""
+                    shwrap("""
                     cosa buildextend-metal
                     """)
                 }, metal4k: {
-                    utils.shwrap("""
+                    shwrap("""
                     cosa buildextend-metal4k
                     """)
                 }
             }
 
             stage('Build Live') {
-                utils.shwrap("""
+                shwrap("""
                 cosa buildextend-live
                 """)
             }
@@ -362,22 +364,22 @@ lock(resource: "build-${params.STREAM}") {
                 // installs with the image format we ship
                 // lower to make sure we don't go over and account for overhead
                 def xz_memlimit = cosa_memory_request_mb - 512
-                utils.shwrap("""
+                shwrap("""
                 export XZ_DEFAULTS=--memlimit=${xz_memlimit}Mi
                 cosa compress --compressor xz --artifact metal --artifact metal4k
                 """)
                 try {
                     parallel metal: {
-                        utils.shwrap("kola testiso -S --output-dir tmp/kola-metal")
+                        shwrap("kola testiso -S --output-dir tmp/kola-metal")
                     }, metal4k: {
-                        utils.shwrap("kola testiso -SP --qemu-native-4k --output-dir tmp/kola-metal4k")
+                        shwrap("kola testiso -SP --qemu-native-4k --output-dir tmp/kola-metal4k")
                     }
                 } catch (Throwable e) {
                     archiveArtifacts "builds/latest/**/*.iso"
                     throw e
                 } finally {
-                    utils.shwrap("tar -cf - tmp/kola-metal/ | xz -c9 > ${env.WORKSPACE}/kola-testiso-metal.tar.xz")
-                    utils.shwrap("tar -cf - tmp/kola-metal4k/ | xz -c9 > ${env.WORKSPACE}/kola-testiso-metal4k.tar.xz")
+                    shwrap("tar -cf - tmp/kola-metal/ | xz -c9 > ${env.WORKSPACE}/kola-testiso-metal.tar.xz")
+                    shwrap("tar -cf - tmp/kola-metal4k/ | xz -c9 > ${env.WORKSPACE}/kola-testiso-metal4k.tar.xz")
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'kola-testiso*.tar.xz'
                 }
             }
@@ -387,7 +389,7 @@ lock(resource: "build-${params.STREAM}") {
             ["Aliyun", "AWS", "Azure", "DigitalOcean", "Exoscale", "GCP", "IBMCloud", "OpenStack", "VMware", "Vultr"].each {
                 pbuilds[it] = {
                     def cmd = it.toLowerCase()
-                    utils.shwrap("""
+                    shwrap("""
                     cosa buildextend-${cmd}
                     """)
                 }
@@ -404,7 +406,7 @@ lock(resource: "build-${params.STREAM}") {
                     // XXX: use the temporary 'ami-import' subpath for now; once we
                     // also publish vmdks, we could make this more efficient by
                     // uploading first, and then pointing ore at our uploaded vmdk
-                    utils.shwrap("""
+                    shwrap("""
                     export AWS_CONFIG_FILE=\${AWS_FCOS_BUILDS_BOT_CONFIG}
                     cosa buildextend-aws ${suffix} \
                         --upload \
@@ -419,7 +421,7 @@ lock(resource: "build-${params.STREAM}") {
             // If there is a config for GCP then we'll upload our image to GCP
             if (utils.path_exists("\${GCP_IMAGE_UPLOAD_CONFIG}") && !is_mechanical) {
                 stage('Upload GCP') {
-                    utils.shwrap("""
+                    shwrap("""
                     # pick up the project to use from the config
                     gcp_project=\$(jq -r .project_id \${GCP_IMAGE_UPLOAD_CONFIG})
                     # collect today's date for the description
@@ -448,7 +450,7 @@ lock(resource: "build-${params.STREAM}") {
         // This is a POC setup and will be modified over time
         // See: https://github.com/keylime/enhancements/blob/master/16_remote_allowlist_retrieval.md
         stage('KeyLime Hash Generation') {
-            utils.shwrap("""
+            shwrap("""
             cosa generate-hashlist --release=${newBuildID} --output=builds/${newBuildID}/${basearch}/exp-hash.json
             sha256sum builds/${newBuildID}/${basearch}/exp-hash.json > builds/${newBuildID}/${basearch}/exp-hash.json-CHECKSUM
             """)
@@ -457,21 +459,21 @@ lock(resource: "build-${params.STREAM}") {
         stage('Archive') {
             // lower to make sure we don't go over and account for overhead
             def xz_memlimit = cosa_memory_request_mb - 512
-            utils.shwrap("""
+            shwrap("""
             export XZ_DEFAULTS=--memlimit=${xz_memlimit}Mi
             cosa compress --compressor xz
             """)
 
             // Run the coreos-meta-translator against the most recent build,
             // which will generate a release.json from the meta.json files
-            utils.shwrap("""
+            shwrap("""
             cosa generate-release-meta --workdir .
             """)
 
             if (s3_stream_dir) {
               // just upload as public-read for now, but see discussions in
               // https://github.com/coreos/fedora-coreos-tracker/issues/189
-              utils.shwrap("""
+              shwrap("""
               export AWS_CONFIG_FILE=\${AWS_FCOS_BUILDS_BOT_CONFIG}
               cosa buildupload s3 --acl=public-read ${s3_stream_dir}/builds
               """)
@@ -479,7 +481,7 @@ lock(resource: "build-${params.STREAM}") {
               // In devel mode without an S3 server, just archive into the PVC
               // itself. Otherwise there'd be no other way to retrieve the
               // artifacts. But note we only keep one build at a time.
-              utils.shwrap("""
+              shwrap("""
               rm -rf ${developer_builddir}
               mkdir -p ${developer_builddir}
               cp -aT builds ${developer_builddir}
@@ -493,7 +495,7 @@ lock(resource: "build-${params.STREAM}") {
         // are pulled from their S3 locations.
         if (official && s3_stream_dir && utils.path_exists("/etc/fedora-messaging-cfg/fedmsg.toml")) {
             stage('Sign Images') {
-                utils.shwrap("""
+                shwrap("""
                 export AWS_CONFIG_FILE=\${AWS_FCOS_BUILDS_BOT_CONFIG}
                 cosa sign robosignatory --s3 ${s3_stream_dir}/builds \
                     --extra-fedmsg-keys stream=${params.STREAM} \
@@ -502,7 +504,7 @@ lock(resource: "build-${params.STREAM}") {
                 """)
             }
             stage("OSTree Import: Compose Repo") {
-                utils.shwrap("""
+                shwrap("""
                 /var/tmp/fcos-releng/coreos-ostree-importer/send-ostree-import-request.py \
                     --build=${newBuildID} --s3=${s3_stream_dir} --repo=compose \
                     --fedmsg-conf=/etc/fedora-messaging-cfg/fedmsg.toml
@@ -556,7 +558,7 @@ lock(resource: "build-${params.STREAM}") {
             stage('Publish') {
                 // use jnlp container in our pod, which has `oc` in it already
                 container('jnlp') {
-                    utils.shwrap("""
+                    shwrap("""
                     oc start-build --wait fedora-coreos-pipeline-release \
                         -e STREAM=${params.STREAM} \
                         -e VERSION=${newBuildID} \
@@ -595,7 +597,7 @@ lock(resource: "build-${params.STREAM}") {
             try {
                 if (official) {
                     slackSend(color: color, message: message)
-                    utils.shwrap("""
+                    shwrap("""
                     /var/tmp/fcos-releng/scripts/broadcast-fedmsg.py --fedmsg-conf=/etc/fedora-messaging-cfg/fedmsg.toml \
                         build.state.change --build ${newBuildID} --basearch ${basearch} --stream ${params.STREAM} \
                         --build-dir ${BUILDS_BASE_HTTP_URL}/${params.STREAM}/builds/${newBuildID}/${basearch} \
